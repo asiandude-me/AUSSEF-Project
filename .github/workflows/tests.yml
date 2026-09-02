@@ -28,12 +28,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # 3.11 is the version pinned in requirements-lock.txt. CLAUDE.md allows
       # 3.11+, but this job verifies the recorded environment, not the whole
       # supported range.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
