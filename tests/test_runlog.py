@@ -343,3 +343,24 @@ def test_each_line_is_standalone_json(log_path):
         pass
     for line in log_path.read_text().splitlines():
         json.loads(line)
+
+
+def test_git_is_dirty_ignores_changes_under_results(temp_repo):
+    """A run must not mark itself dirty by writing its own output.
+
+    `git_dirty` answers a narrower question than "is the tree clean": was the
+    code that produced this result committed? Figures and tables written by
+    the run itself do not bear on that, so `results/` is excluded for the
+    same reason `logs/` is.
+    """
+    (temp_repo / "results").mkdir()
+    (temp_repo / "results" / "summary.csv").write_text("generator,rate\ngbm,0.05\n")
+    assert git_is_dirty(temp_repo) is False
+
+
+def test_git_is_dirty_still_sees_source_changes_alongside_results(temp_repo):
+    """Excluding results must not hide an uncommitted code change."""
+    (temp_repo / "results").mkdir()
+    (temp_repo / "results" / "summary.csv").write_text("x\n")
+    (temp_repo / "analysis.py").write_text("x = 1\n")
+    assert git_is_dirty(temp_repo) is True

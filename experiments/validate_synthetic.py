@@ -179,9 +179,32 @@ def acceptance_table(summary, config):
         "",
         "## Rejection rates at every lag",
         "",
-        summary.to_markdown(index=False, floatfmt=".4f"),
+        markdown_table(summary),
     ]
     return "\n".join(lines)
+
+
+def markdown_table(frame, float_format="{:.4f}"):
+    """Render a DataFrame as a markdown table.
+
+    Written out rather than using `DataFrame.to_markdown`, which needs the
+    `tabulate` package. The project's dependency list is deliberately short
+    and every addition has to be justified; a table formatter does not earn
+    a new dependency.
+    """
+
+    def cell(value):
+        return float_format.format(value) if isinstance(value, float) else str(value)
+
+    header = list(frame.columns)
+    rows = [[cell(v) for v in record] for record in frame.itertuples(index=False)]
+    return "\n".join(
+        [
+            "| " + " | ".join(header) + " |",
+            "| " + " | ".join("---" for _ in header) + " |",
+            *["| " + " | ".join(row) + " |" for row in rows],
+        ]
+    )
 
 
 def write_figure(correlograms, config, path):
