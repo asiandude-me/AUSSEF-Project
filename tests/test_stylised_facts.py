@@ -28,6 +28,7 @@ from datasnoop.stylised_facts import (
     excess_kurtosis_se,
     jarque_bera,
     ljung_box,
+    robust_ljung_box,
     summarise,
 )
 from datasnoop.synthetic import garch11_log_returns, gbm_log_returns, standardised_t
@@ -291,3 +292,131 @@ def test_ljung_box_rejects_more_lags_than_observations():
 def test_autocorrelation_rejects_a_non_positive_lag():
     with pytest.raises(ValueError, match="max_lag"):
         autocorrelation(rng().standard_normal(100), max_lag=0)
+
+
+# --- the heteroskedasticity-robust Ljung-Box test -------------------------
+#
+# The classical Ljung-Box test assumes the data are independent under the
+# null. GARCH returns are serially *uncorrelated* but not independent, and
+# under that weaker condition the sample autocorrelation is noisier than the
+# 1/sqrt(n) the classical test assumes. The test then rejects far more often
+# than its nominal rate, on series that are unpredictable by construction.
+#
+# These tests pin down both halves of that: the classical test is shown to
+# over-reject, and the robust version is shown to fix it without losing the
+# ability to detect real autocorrelation.
+
+N_ROBUST_SERIES = 400
+N_ROBUST_DAYS = 1500
+
+GARCH_PARAMS = dict(mu=0.0, omega=2e-6, alpha=0.08, beta=0.90)
+
+
+def garch_series(n_series, n_days, seed, **params):
+    children = np.random.SeedSequence(seed).spawn(n_series)
+    return [
+        garch11_log_returns(n_days, rng=np.random.default_rng(child), **params)
+        for child in children
+    ]
+
+
+@pytest.fixture(scope="module")
+def garch_sample():
+    return garch_series(N_ROBUST_SERIES, N_ROBUST_DAYS, 4242, **GARCH_PARAMS)
+
+
+def test_robust_ljung_box_reduces_to_box_pierce_on_independent_data():
+    """Under independence the robust variance tau_k converges to 1, leaving
+    n * sum(rho_k^2) -- the Box-Pierce statistic. So on IID data the robust
+    test must agree closely with that, and hence with Ljung-Box, which is
+    Box-Pierce plus a small-sample correction."""
+    x = rng(30).standard_normal(20_000)
+    robust_stat, _ = robust_ljung_box(x, lags=10)
+    box_pierce = len(x) * np.sum(autocorrelation(x, max_lag=10) ** 2)
+    assert robust_stat == pytest.approx(box_pierce, rel=0.05)
+
+
+def test_classical_ljung_box_over_rejects_on_conditionally_heteroskedastic_data(
+    garch_sample,
+):
+    """Documents the problem the robust test exists to solve.
+
+    GARCH returns have zero autocorrelation by construction, so a correctly
+    calibrated test would reject at the nominal 5%. The classical test
+    rejects far more often. This is a property of the test, not a defect in
+    the generator: see the companion test below confirming the sample
+    autocorrelations are centred on zero.
+    """
+    rate = np.mean(
+        [ljung_box(r, lags=10)[1] < CALIBRATION_LEVEL for r in garch_sample]
+    )
+    _, high = calibration_band(N_ROBUST_SERIES, CALIBRATION_LEVEL)
+    assert rate > 3 * high, f"expected marked over-rejection, got {rate}"
+
+
+def test_garch_autocorrelations_are_centred_on_zero_but_overdispersed(garch_sample):
+    """The generator is sound; the classical test's assumed variance is not.
+
+    The mean sample autocorrelation is ~0, so the returns really are serially
+    uncorrelated. Its standard deviation exceeds 1/sqrt(n), which is exactly
+    why a test built on that assumption rejects too often.
+    """
+    rho1 = np.array([autocorrelation(r, max_lag=1)[0] for r in garch_sample])
+    assert abs(rho1.mean()) < 4 * rho1.std() / np.sqrt(N_ROBUST_SERIES)
+    assert rho1.std() > 1.15 / np.sqrt(N_ROBUST_DAYS)
+
+
+def test_robust_ljung_box_is_calibrated_on_conditionally_heteroskedastic_data(
+    garch_sample,
+):
+    """The point of the whole correction, and the acceptance criterion for it.
+
+    On a series that is unpredictable in direction, the rejection rate must
+    match the nominal level whether or not the volatility clusters.
+    """
+    rate = np.mean(
+        [robust_ljung_box(r, lags=10)[1] < CALIBRATION_LEVEL for r in garch_sample]
+    )
+    low, high = calibration_band(N_ROBUST_SERIES, CALIBRATION_LEVEL)
+    assert low < rate < high, f"robust rejection rate {rate} outside {low}-{high}"
+
+
+def test_robust_ljung_box_is_still_calibrated_on_independent_data(calibration_sample):
+    """The correction must not break the case the classical test already handles."""
+    rate = np.mean(
+        [robust_ljung_box(r, lags=10)[1] < CALIBRATION_LEVEL for r in calibration_sample]
+    )
+    low, high = calibration_band(N_CALIBRATION_SERIES, CALIBRATION_LEVEL)
+    assert low < rate < high, f"robust rejection rate {rate} outside {low}-{high}"
+
+
+def test_robust_ljung_box_still_detects_real_autocorrelation():
+    """A test that never rejects would be perfectly calibrated and useless."""
+    x = ar1(1500, phi=0.15, rng=rng(31))
+    assert robust_ljung_box(x, lags=10)[1] < 1e-6
+
+
+def test_robust_ljung_box_detects_autocorrelation_added_to_a_garch_series():
+    """The case that matters: real signal must survive the correction even
+    when the volatility clusters, or the robust test would hide exactly what
+    the experiment is looking for."""
+    clean = garch11_log_returns(4000, rng=rng(32), **GARCH_PARAMS)
+    # Inject a genuine AR(1) structure into the returns.
+    dirty = clean.copy()
+    for t in range(1, dirty.size):
+        dirty[t] += 0.15 * dirty[t - 1]
+    assert robust_ljung_box(clean, lags=10)[1] > 0.01
+    assert robust_ljung_box(dirty, lags=10)[1] < 1e-4
+
+
+def test_summarise_reports_both_the_classical_and_robust_tests():
+    r = garch11_log_returns(1000, rng=rng(33), **GARCH_PARAMS)
+    out = summarise(r, lags=[10], significance_level=0.05)
+    assert "lb_p_r_lag10" in out
+    assert "lb_robust_p_r_lag10" in out
+    assert "lb_robust_reject_r_lag10" in out
+
+
+def test_robust_ljung_box_rejects_more_lags_than_observations():
+    with pytest.raises(ValueError, match="lags"):
+        robust_ljung_box(rng().standard_normal(10), lags=20)
