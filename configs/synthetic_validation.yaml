@@ -1,0 +1,75 @@
+# Validation of the synthetic generators against the stylised facts of real
+# returns. Every number the experiment depends on lives here; none of them
+# appears as a literal in the analysis code.
+#
+# The acceptance criteria this run is measured against are the table in
+# docs/notes/03_validation_tests.md, section 4.
+
+seed: 20260902
+
+# About ten years of trading days, matching the length of the real ASX
+# samples the search will later run on.
+n_days: 2500
+
+# Independent series per generator. The reported quantity is a rejection
+# *rate* over these series, not one series' verdict: a single series can pass
+# or fail by luck, a rate over many cannot.
+n_series: 500
+
+significance_level: 0.05
+
+# Several lags are reported rather than one being defended. Too few lags miss
+# slow-decaying volatility clustering; too many dilute the statistic.
+lags: [10, 20, 50]
+
+# Lags shown in the correlogram figure.
+acf_max_lag: 50
+
+# All parameters are per trading day, in log-return units.
+#
+# mu = 0 throughout. The stylised-facts tests are unaffected by a constant
+# mean, and a zero-drift null is unambiguous: any positive Sharpe the later
+# search reports is then purely an artefact of searching. The drift setting
+# for the *search* experiment is a separate decision, still open.
+#
+# sigma = 0.01/day is about 16% a year (0.01 * sqrt(252)), a realistic
+# equity volatility.
+generators:
+  gbm:
+    model: gbm
+    mu: 0.0
+    sigma: 0.01
+
+  student_t:
+    model: student_t
+    mu: 0.0
+    sigma: 0.01
+    # nu = 5 gives a theoretical excess kurtosis of 6/(nu-4) = 6, in the
+    # range seen in real daily equity returns. The sample estimate is noisy
+    # at this nu, which is a property of the distribution, not a bug.
+    nu: 5
+
+  garch11:
+    model: garch11
+    mu: 0.0
+    # omega / (1 - alpha - beta) = 2e-6 / 0.02 = 1e-4, so the long-run
+    # standard deviation is 0.01 and matches the other generators.
+    omega: 2.0e-6
+    # Typical fitted values for daily equity returns. alpha + beta = 0.98 is
+    # close to 1, which is what makes the clustering persistent. Chosen from
+    # the literature rather than fitted to ASX data: fitting would calibrate
+    # the control to the treatment, which is a defensible choice but a
+    # different one, and it needs data this project has not yet downloaded.
+    alpha: 0.08
+    beta: 0.90
+    burn_in: 500
+
+  garch11_t:
+    model: garch11
+    mu: 0.0
+    omega: 2.0e-6
+    alpha: 0.08
+    beta: 0.90
+    burn_in: 500
+    innovations: t
+    nu: 5
