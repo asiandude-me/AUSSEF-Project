@@ -9,6 +9,10 @@ one per claim, from ``docs/notes/03_validation_tests.md``:
     series must be unpredictable in direction). On squared or absolute
     returns we want strong autocorrelation, because that is what volatility
     clustering is.
+  * :func:`robust_ljung_box` — the same question, corrected for conditional
+    heteroskedasticity. The classical test assumes independence under the
+    null; GARCH returns are uncorrelated but not independent, and the
+    classical test over-rejects badly on them. Diebold (1986).
   * :func:`arch_lm` — Engle's test for volatility clustering specifically.
   * :func:`jarque_bera` — are the tails heavier than a normal's?
 
@@ -43,6 +47,7 @@ __all__ = [
     "excess_kurtosis_se",
     "jarque_bera",
     "ljung_box",
+    "robust_ljung_box",
     "summarise",
 ]
 
@@ -104,6 +109,69 @@ def ljung_box(x: np.ndarray, lags: int) -> tuple[float, float]:
     rho = autocorrelation(x, max_lag=lags)
     k = np.arange(1, lags + 1)
     q = n * (n + 2) * np.sum(rho**2 / (n - k))
+    return float(q), float(stats.chi2.sf(q, df=lags))
+
+
+def robust_ljung_box(x: np.ndarray, lags: int) -> tuple[float, float]:
+    """Ljung-Box corrected for conditional heteroskedasticity. Diebold (1986).
+
+    **Why the classical test is not enough here.** :func:`ljung_box` assumes
+    the data are *independent* under the null, and uses ``1/n`` as the
+    variance of each sample autocorrelation. A GARCH series is serially
+    uncorrelated but not independent: today's variance depends on yesterday's
+    move. Under that weaker condition the sample autocorrelation is noisier
+    than ``1/sqrt(n)``, so a test that assumes ``1/sqrt(n)`` treats ordinary
+    sampling noise as evidence of structure and rejects far too often. On the
+    GARCH generators in this project the classical test rejects a true null
+    on roughly a quarter to a half of all series, at a nominal 5% level.
+
+    That would be a damaging error to make here, since it would condemn a
+    generator that is unpredictable by construction and therefore a perfectly
+    valid control.
+
+    **The fix.** Estimate each autocorrelation's variance from the data
+    instead of assuming it. For a serially uncorrelated series the asymptotic
+    variance of ``sqrt(n) * rho_k`` is
+
+        tau_k = ( mean of (x_t - xbar)^2 (x_{t-k} - xbar)^2 ) / gamma_0^2
+
+    where ``gamma_0`` is the sample variance. Read it as: how much do large
+    values at lag k coincide with large values now. Under independence the
+    numerator factorises into ``gamma_0 * gamma_0`` and ``tau_k`` is 1,
+    recovering the usual assumption. When volatility clusters, big moves
+    cluster together, the numerator is larger, and ``tau_k`` exceeds 1 --
+    which is precisely the extra noise the classical test ignores.
+
+    Standardising each term by its own variance gives
+
+        Q_robust = n * sum_k rho_k^2 / tau_k
+
+    which again follows a chi-squared distribution with m degrees of freedom
+    under the null. With ``tau_k = 1`` this is the Box-Pierce statistic, so
+    the correction is a strict generalisation rather than a different test.
+
+    Returns ``(Q_robust, p_value)``.
+
+    This is reported alongside the classical statistic rather than replacing
+    it, because the difference between the two is itself a finding: it is a
+    small worked example of the project's own thesis, that a test applied
+    outside the assumptions it was derived under reports structure that is
+    not there.
+    """
+    x = np.asarray(x, dtype=float)
+    n = x.size
+    if lags >= n:
+        raise ValueError(f"lags ({lags}) must be less than n ({n})")
+
+    centred = x - x.mean()
+    gamma_0 = np.dot(centred, centred) / n
+
+    q = 0.0
+    for k in range(1, lags + 1):
+        rho_k = np.dot(centred[k:], centred[:-k]) / (n * gamma_0)
+        tau_k = np.dot(centred[k:] ** 2, centred[:-k] ** 2) / (n * gamma_0**2)
+        q += n * rho_k**2 / tau_k
+
     return float(q), float(stats.chi2.sf(q, df=lags))
 
 
@@ -251,6 +319,16 @@ def summarise(
             out[f"lb_stat_{name}_lag{lag}"] = stat
             out[f"lb_p_{name}_lag{lag}"] = p
             out[f"lb_reject_{name}_lag{lag}"] = bool(p < significance_level)
+
+        # The robust test, on the returns only. This is where the null-model
+        # requirement is checked, and the only place the classical test's
+        # independence assumption is violated in a way that matters: the
+        # squared and absolute series are genuinely autocorrelated under
+        # GARCH, so there is no true null there to mis-calibrate.
+        stat, p = robust_ljung_box(r, lags=lag)
+        out[f"lb_robust_stat_r_lag{lag}"] = stat
+        out[f"lb_robust_p_r_lag{lag}"] = p
+        out[f"lb_robust_reject_r_lag{lag}"] = bool(p < significance_level)
 
         stat, p = arch_lm(r, lags=lag)
         out[f"arch_stat_lag{lag}"] = stat

@@ -107,6 +107,9 @@ def aggregate(name, results, lags):
             row[f"reject_lb_{series}_lag{lag}"] = results[
                 f"lb_reject_{series}_lag{lag}"
             ].mean()
+        row[f"reject_lb_robust_r_lag{lag}"] = results[
+            f"lb_robust_reject_r_lag{lag}"
+        ].mean()
         row[f"reject_arch_lag{lag}"] = results[f"arch_reject_lag{lag}"].mean()
 
     row["reject_jb"] = results["jb_reject"].mean()
@@ -149,13 +152,14 @@ def acceptance_table(summary, config):
         f"A correctly calibrated rate has standard error {se:.4f}, so anything in",
         f"roughly {level - 3 * se:.3f} to {level + 3 * se:.3f} is consistent with {level:g}.",
         "",
-        "| Generator | reject LB(r) | reject LB(r²) | reject LB(&#124;r&#124;) | reject ARCH | reject JB | median excess kurtosis (IQR) |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Generator | reject LB(r) | **reject LB(r) robust** | reject LB(r²) | reject LB(&#124;r&#124;) | reject ARCH | reject JB | median excess kurtosis (IQR) |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for _, row in summary.iterrows():
         lines.append(
             f"| {row['generator']} "
             f"| {row[f'reject_lb_r_lag{primary}']:.3f} "
+            f"| **{row[f'reject_lb_robust_r_lag{primary}']:.3f}** "
             f"| {row[f'reject_lb_r2_lag{primary}']:.3f} "
             f"| {row[f'reject_lb_abs_r_lag{primary}']:.3f} "
             f"| {row[f'reject_arch_lag{primary}']:.3f} "
@@ -165,13 +169,27 @@ def acceptance_table(summary, config):
 
     lines += [
         "",
-        "## How to read the first column",
+        "## How to read the first two columns",
         "",
         "`reject LB(r)` is the null-model requirement. Every generator must sit",
         f"near {level:g} here: the returns themselves carry no predictable direction,",
         "which is what makes the series a valid control for a directional trading",
         "rule. A generator failing this column is broken as a control, and that is",
         "a correctness bug rather than a cosmetic one.",
+        "",
+        "**The two versions of that column disagree on the GARCH rows, and the",
+        "robust one is the correct one.** The classical Ljung-Box test assumes the",
+        "data are independent under the null and uses 1/n as the variance of each",
+        "sample autocorrelation. GARCH returns are serially uncorrelated but not",
+        "independent, so their sample autocorrelations are more variable than that,",
+        "and a test built on the wrong null variance rejects far too often. The",
+        "returns are unpredictable in direction by construction: `E[r_t | past] = mu`",
+        "holds exactly for every generator here. The robust column corrects the",
+        "variance estimate (Diebold 1986) and recovers the nominal rate.",
+        "",
+        "This is worth reporting rather than quietly fixing. It is a small worked",
+        "example of the project's own thesis: a standard test, applied outside the",
+        "assumptions it was derived under, reports structure that is not there.",
         "",
         "The remaining columns are what separates the generators, and they are",
         "meant to differ: heavy tails show up in `reject JB`, volatility clustering",
@@ -311,6 +329,10 @@ def main():
             # without opening the results files.
             rejection_rate_ljung_box_returns={
                 row["generator"]: round(row[f"reject_lb_r_lag{primary}"], 4)
+                for row in summary_rows
+            },
+            rejection_rate_ljung_box_returns_robust={
+                row["generator"]: round(row[f"reject_lb_robust_r_lag{primary}"], 4)
                 for row in summary_rows
             },
             rejection_rate_arch={

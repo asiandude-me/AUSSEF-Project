@@ -117,7 +117,10 @@ generator.
 **Sheppard, K., et al. `arch`: Autoregressive Conditional Heteroskedasticity
 (ARCH) and other tools for financial econometrics (Python package).**
 https://bashtage.github.io/arch/
-The implementation used for GARCH simulation and fitting.
+Used as an independent cross-check: `tests/test_synthetic.py` fits a GARCH(1,1)
+with this package to a long series from our own generator and confirms it
+recovers the parameters that produced it. The generator itself is written by
+hand, so that every line can be justified.
 
 ---
 
@@ -166,3 +169,17 @@ Used to download ASX price history. **Outstanding task:** read and record the
 terms of use for the underlying data before the first download, and note here
 what they permit for a non-commercial student research project. Do not fetch
 data until this is done.
+
+**Diebold, F. X. (1986). Testing for Serial Correlation in the Presence of
+ARCH.** *Proceedings of the American Statistical Association, Business and
+Economic Statistics Section*, 323–328.
+Shows that the classical Ljung–Box test over-rejects when returns are
+serially uncorrelated but conditionally heteroskedastic, because the sample
+autocorrelations are more variable than the independence assumption implies,
+and gives the corrected variance estimate. The basis for
+`robust_ljung_box` in `src/datasnoop/stylised_facts.py`; the correction was
+added after the first validation run showed the classical test rejecting a
+true null on a quarter of GARCH series. See also Francq, Roy & Zakoïan
+(2005), *Journal of the American Statistical Association* 100, 532–544, for
+the modern treatment of portmanteau tests with uncorrelated but dependent
+errors.
