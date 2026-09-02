@@ -1,0 +1,53 @@
+# Runs the test suite on every pull request and every push to main, so the
+# repository carries visible evidence that the tests passed at each stage
+# rather than only a claim that they did.
+#
+# The environment is built from requirements-lock.txt rather than resolving
+# dependencies afresh. That is deliberate: the lock file records the exact
+# versions the results were produced with, so this job checks the recorded
+# environment still installs and still passes, which is what the project's
+# reproducibility requirement actually asks. It does mean the job will not
+# notice a newer release of a dependency breaking the code. That is the
+# right trade for a research repository, where matching the recorded
+# environment matters more than tracking upstream.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only token: the job only needs to check out the code.
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.11 is the version pinned in requirements-lock.txt. CLAUDE.md allows
+      # 3.11+, but this job verifies the recorded environment, not the whole
+      # supported range.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install the recorded environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-lock.txt
+          # --no-deps because requirements-lock.txt has already pinned every
+          # dependency; without it pip would be free to resolve different
+          # versions and the point of the lock file would be lost.
+          pip install -e . --no-deps
+
+      - name: Show installed versions
+        run: pip freeze
+
+      - name: Run tests
+        run: pytest -v

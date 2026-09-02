@@ -155,3 +155,23 @@ of the project this section is the skeleton of the methodology section.
   AI assistance live in `docs/notes/` and are labelled as such. They are
   study material, not part of the submitted report, and the report must be
   written independently of them.
+
+### 2026-09-02 — continuous integration
+
+- **CI runs the test suite** on every pull request and every push to `main`
+  (`.github/workflows/tests.yml`). The point is evidence: the repository
+  shows the tests passing at each stage of development, rather than only
+  asserting that they did. That record is part of what the logbook and the
+  commit history are meant to demonstrate.
+- **CI installs from `requirements-lock.txt`, not by re-resolving
+  dependencies.** The lock file records the exact versions the results were
+  produced with, so the job checks that the *recorded* environment still
+  installs and still passes. The package itself is then installed with
+  `--no-deps`, because re-resolving at that point would defeat the lock.
+  The known cost: CI will not notice a newer release of a dependency
+  breaking the code. For a research repository that is the right trade,
+  since matching the recorded environment matters more than tracking
+  upstream. Revisit only if a dependency needs upgrading.
+- **Python 3.11 in CI**, matching the version the lock file was frozen on.
+  `Technical setup` allows 3.11+; the job verifies the recorded environment
+  rather than the whole supported range.
