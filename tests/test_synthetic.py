@@ -236,9 +236,15 @@ def test_garch_rejects_negative_parameters(alpha, beta):
 
 
 def test_garch_excess_kurtosis_formula_rejects_an_infinite_fourth_moment():
-    """The formula requires 3a^2 + 2ab + b^2 < 1; otherwise kurtosis is infinite."""
+    """The fourth moment needs 3a^2 + 2ab + b^2 < 1, a stricter condition than
+    stationarity. These parameters are stationary (alpha + beta = 0.9 < 1) but
+    give 3a^2 + 2ab + b^2 = 1.13, so the variance settles down while the
+    kurtosis does not."""
+    alpha, beta = 0.4, 0.5
+    assert alpha + beta < 1
+    assert 3 * alpha**2 + 2 * alpha * beta + beta**2 > 1
     with pytest.raises(ValueError, match="fourth moment"):
-        garch11_excess_kurtosis_normal(0.2, 0.9)
+        garch11_excess_kurtosis_normal(alpha, beta)
 
 
 def test_garch_conditional_variance_responds_to_a_shock():
