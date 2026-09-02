@@ -1,0 +1,15 @@
+# Downloaded and cached market data (regenerated from the data module)
+data/raw/
+data/cache/
+
+# Python environment and build artefacts
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
