@@ -175,3 +175,98 @@ of the project this section is the skeleton of the methodology section.
 - **Python 3.11 in CI**, matching the version the lock file was frozen on.
   `Technical setup` allows 3.11+; the job verifies the recorded environment
   rather than the whole supported range.
+
+### 2026-09-02 — synthetic generators and their validation
+
+- **Module split.** `src/datasnoop/synthetic.py` makes series;
+  `src/datasnoop/stylised_facts.py` measures them. Kept apart so the code
+  that validates a generator cannot share a bug with the generator itself.
+- **Units.** Every parameter is per trading day, in log-return units.
+  `sigma = 0.01/day` is about 16% a year.
+- **`mu = 0` in the validation config.** The stylised-facts tests are
+  unaffected by a constant mean, and a zero-drift null is unambiguous: any
+  positive Sharpe the later search reports is then purely an artefact of
+  searching, with no drift-harvesting to argue about. **Still open:** the
+  drift setting for the search experiment itself. Note 1 flags that a
+  long-only rule earns `mu · E[s_t]` without skill, so the search must
+  either use `mu = 0` or score every rule against buy-and-hold on the same
+  series. Decide before running the search.
+- **GARCH written by hand.** The recursion is five lines and is written out
+  rather than delegated to `arch`, so every line can be justified. `arch` is
+  used once, as an independent oracle: a test fits a GARCH(1,1) to 50,000
+  points from our generator and confirms it recovers the parameters that
+  produced them.
+- **Burn-in of 500 steps**, started at the long-run variance, so the
+  returned series is stationary from its first observation.
+- **Student-t scaled to unit variance** by the factor `sqrt((nu-2)/nu)`, so
+  `sigma` means the same thing — the unconditional daily standard deviation
+  — for every generator. Without it, changing `nu` would silently change the
+  volatility as well as the tails and confound the two. Requires `nu > 2`,
+  which the code enforces.
+- **GARCH parameters from the literature** (`alpha = 0.08, beta = 0.90`),
+  not fitted to ASX data. Fitting would calibrate the control to the
+  treatment — defensible, arguably better, but a different design — and it
+  needs data that has not been downloaded yet. Recorded as a deliberate
+  choice, not an oversight.
+- **A fourth generator, GARCH with t innovations**, is validated alongside
+  the three the design names. It costs one config entry and it is the row
+  closest to real returns, so it informs which null the search should run on.
+- **Statistics hand-written, then cross-checked.** Ljung-Box, ARCH-LM,
+  Jarque-Bera and excess kurtosis are implemented from their formulas in
+  numpy and scipy primitives. A test asserts they agree with statsmodels and
+  scipy to 1e-8 on the same input. Defensible under questioning *and*
+  checked against the reference implementation.
+- **Independent series from one seed** via `SeedSequence(seed).spawn(S)`,
+  which gives independent streams rather than one stream cut into pieces.
+- **Rejection rates, never a single verdict.** Validation reports the
+  fraction of series rejecting each test over `n_series = 500` independent
+  series, with effect sizes beside every rate. A single series can pass or
+  fail by luck.
+
+#### The classical Ljung-Box test over-rejects on GARCH data
+
+The first validation run rejected no-autocorrelation-in-returns on 26% of
+GARCH series and 49% of GARCH-t series, against a nominal 5%. That column is
+the null-model requirement, so this looked like a broken control.
+
+It was the test, not the generator. Diagnosis: across 400 series the mean
+sample autocorrelation was ~0 — the returns really are serially uncorrelated
+— but its standard deviation was 24% (GARCH) and 49% (GARCH-t) above the
+`1/sqrt(n)` the classical test assumes. Classical Ljung-Box needs the data
+to be *independent* under the null; GARCH returns are uncorrelated but not
+independent, so the assumed null variance is too small and the test treats
+ordinary sampling noise as structure.
+
+**Fix:** `robust_ljung_box` estimates each autocorrelation's variance from
+the data instead of assuming it (Diebold 1986). Under independence the
+estimate converges to 1 and the statistic reduces to Box-Pierce, so it
+generalises the classical test rather than replacing it. The rejection rates
+fall to 0.056 and 0.046, and an AR(1) injected into a GARCH series is still
+detected at `p < 1e-4`.
+
+**Both are reported**, classical and robust, rather than the classical one
+being quietly dropped. The gap between them is a finding: it is a small
+worked example of this project's own thesis, that a standard test applied
+outside the assumptions it was derived under reports structure that is not
+there. This belongs in the report.
+
+#### Two effect sizes that look wrong and are not
+
+- **GARCH excess kurtosis** measures ~0.80 at `n = 2500` against a closed
+  form of 1.43. The fourth moment exists only when
+  `3a² + 2ab + b² < 1`, satisfied here by 0.027, so convergence is slow:
+  the median climbs to 1.41 by `n = 2,000,000` (checked). Ten years of daily
+  data is too short to reach the asymptotic value. A consequence of choosing
+  persistence realistic enough to matter, not a reason to change it.
+- **Student-t excess kurtosis** at `nu = 5` is noisy across seeds, as Note 3
+  predicted. Both are recorded in the results output where the numbers are
+  seen, so the discrepancy is answered rather than discovered by a judge.
+
+#### Run-log change
+
+`git_dirty` now excludes `results/` as well as `logs/`. The first validation
+run flagged itself dirty by writing its own figures and tables before the
+log entry was composed, which defeats the flag: it asks whether the *code*
+that produced a result was committed, not whether the run left files behind.
+A test confirms an uncommitted source file alongside those outputs is still
+seen.

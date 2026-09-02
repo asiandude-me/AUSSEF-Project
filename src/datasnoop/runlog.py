@@ -66,10 +66,13 @@ SCHEMA_VERSION = 1
 
 DEFAULT_LOG_RELPATH = Path("logs") / "runs.jsonl"
 
-# Changes under this directory do not count towards `git_dirty`: the log file
-# itself lives here, and the previous run's line must not mark the next run
-# as dirty.
-DIRTY_EXCLUDE = ("logs",)
+# Changes under these directories do not count towards `git_dirty`. Both are
+# places a run writes its own output: the log file itself lives in `logs`, and
+# figures and tables land in `results`. A run must not be marked dirty by the
+# act of producing its own results, and the previous run's log line must not
+# mark the next run as dirty. The flag asks a narrower question -- was the
+# *code* that produced this result committed -- so everything else counts.
+DIRTY_EXCLUDE = ("logs", "results")
 
 
 # --- time -----------------------------------------------------------------

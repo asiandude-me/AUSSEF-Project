@@ -34,7 +34,10 @@ pytest -q
 ```
 
 Every function that does statistical work has a test against a known
-analytical answer.
+analytical answer. Statistical routines are written out from their formulas
+rather than imported, so that each can be justified without relying on a
+library's conventions; tests then assert agreement with `statsmodels` and
+`scipy` to 1e-8 on the same inputs.
 
 ## Layout
 
@@ -51,6 +54,12 @@ notebooks/       exploration only; nothing here is a result
 ```
 
 Directories are created when the first component that uses them is built.
+
+## Experiments
+
+| Script | What it does |
+| --- | --- |
+| `experiments/validate_synthetic.py` | Validates the synthetic generators against the stylised facts of real returns, writing `results/synthetic_validation/`. No generator is used as a control until it passes. |
 
 ## Run log
 
